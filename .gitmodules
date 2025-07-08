@@ -1,0 +1,3 @@
+[submodule "generic-diffusion-feature"]
+	path = generic-diffusion-feature
+	url = git@github.com:Darkbblue/generic-diffusion-feature.git
