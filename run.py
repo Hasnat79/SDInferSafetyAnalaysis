@@ -58,8 +58,8 @@ class StableDiffusionVariant():
 
 
 def set_diffusion_feature_extractor():
-    # device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    # device = "cpu"
     print(f"Using device: {device}")
     df = diffusion_feature.FeatureExtractor(
         layer={
@@ -75,14 +75,153 @@ def set_diffusion_feature_extractor():
 
 def load_image(image_path):
     img = Image.open(image_path)
+    return img 
+
+def calculate_centroids(extracted_safe_unsafe_diffusion_features_per_sample):
+    """
+    Calculate centroids for safe and unsafe features
+    
+    Args:
+        extracted_safe_unsafe_diffusion_features_per_sample: Dictionary containing safe and unsafe features per sample
+        
+    Returns:
+        tuple: (safe_centroid, unsafe_centroid)
+    """
+    pass
+
+def get_intermediate_images_of_diffusion_inference(sd_model, prompt, n_steps=50, p_step=10):
+    """
+    Generate intermediate images during diffusion inference process
+    
+    Args:
+        sd_model: StableDiffusionVariant model instance
+        prompt: Text prompt for generation
+        n_steps: Total number of inference steps
+        p_step: Step interval for capturing intermediate images
+        
+    Returns:
+        list: List of intermediate images at each p_step interval
+    """
+    pass
+
+def get_image_tokens(image, sd_model):
+    """
+    Extract image tokens/features from an image using the diffusion model
+    
+    Args:
+        image: PIL Image or tensor
+        sd_model: StableDiffusionVariant model instance
+        
+    Returns:
+        torch.Tensor: Image tokens/features
+    """
+    pass
+
+def calculate_distance_from_centroid(image_tokens, centroid):
+    """
+    Calculate distances between image tokens and a given centroid
+    
+    Args:
+        image_tokens: Tensor of image tokens/features
+        centroid: Centroid tensor to calculate distances from
+        
+    Returns:
+        tuple: (distances_per_token, mean_distance)
+    """
+    pass
+
+def load_detonate_t2I_alignment_dataset(sample_size=100):
+    """
+    Load the Detonate T2I Alignment dataset
+    
+    Args:
+        sample_size: Number of samples to load
+        
+    Returns:
+        DetonateT2IAlignmentDataset: Dataset instance
+    """
+    pass
+
+def extract_diffusion_features(sample):
+    """
+    Extract diffusion features from a dataset sample
+    
+    Args:
+        sample: Dataset sample containing prompt, chosen and rejected images
+        
+    Returns:
+        tuple: (extracted_safe_features, extracted_unsafe_features)
+    """
+    pass
+
+def plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sample):
+    """
+    Plot clusters of safe and unsafe features for visualization
+    
+    Args:
+        extracted_safe_unsafe_diffusion_features_per_sample: Dictionary containing features per sample
+    """
+    pass
 
 def test_diffusion_feature_extractor(image_path, prompt):
-    df = set_diffusion_feature_extractor()
-    image = load_image(image_path)
-    prompt = df.encode_prompt(prompt)
-    extracted_features = df.extract(image, prompt)
-    for k,v in features.items():
+    diffusion_feature_extractor = set_diffusion_feature_extractor()
+    img = load_image(image_path)
+    prompt = diffusion_feature_extractor.encode_prompt(prompt)
+    extracted_features = diffusion_feature_extractor.extract(prompt,batch_size=1,image=[img])
+    print(f"len(extracted_features): {len(extracted_features)}")
+    for k,v in extracted_features.items():
         print(f"{k}: {v.shape}")
+        # up-level1-repeat1-vit-block0-cross-q: torch.Size([1, 1280, 16, 16])
+        # up-level2-repeat1-vit-block0-cross-map: torch.Size([1, 8, 1024, 77])
+
+def run_diffusion_inference_analysis(extracted_safe_unsafe_diffusion_features_per_sample):
+    """
+        extracted_safe_unsafe_diffusion_features_per_sample:{
+            id: {
+                "safe": extracted_safe_features,
+                "unsafe": extracted_unsafe_features
+        }
+    """
+    
+    safe_centroid, unsafe_centroid = calculate_centroids(extracted_safe_unsafe_diffusion_features_per_sample)
+    sd_1_5 = StableDiffusionVariant(model_name="runwayml/stable-diffusion-v1-5", clip_model_name="openai/clip-vit-large-patch14")
+    
+    for sample_id,values in extracted_safe_unsafe_diffusion_features_per_sample.items():
+        prompt = values['prompt']
+        # we will be expecting 5 intermediate images for each p_step: n = 50 , p_step = 10 --> 50/10 =5 images
+        # 'list' of image (obj/tensor) for each p_step
+        intermediate_images_after_each_p_step = get_intermediate_images_of_diffusion_inference(sd_1_5,prompt, n_steps=50,p_step=10)
+
+        # traverse_each_image 
+        for image in intermediate_images_after_each_p_step:
+            image_tokens = get_image_tokens(image, sd_1_5)
+
+            distance_between_each_token_and_safe_centroid, mean_distance_safe = calculate_distance_from_centroid(image_tokens, safe_centroid)
+            distance_between_each_token_and_unsafe_centroid, mean_distance_unsafe = calculate_distance_from_centroid(image_tokens, unsafe_centroid)
+
+            print(f"Sample ID: {sample_id}, Image: {image}, Safe Distance: {mean_distance_safe.item()}, Unsafe Distance: {mean_distance_unsafe.item()}")
+
+        break
+
+
+def run_inference_safety_analysis():
+    detonate_t2i_dataset = load_detonate_t2I_alignment_dataset(sample_size=10)
+    extracted_safe_unsafe_diffusion_features_per_sample = {}
+    id = 0
+    # traverse samples
+    for sample in tqdm(detonate_t2i_dataset.data):
+        extracted_safe_features, extracted_unsafe_features = extract_diffusion_features(sample)
+        extracted_safe_unsafe_diffusion_features_per_sample[id] = {
+            "prompt": sample['Prompt'],
+            "safe": extracted_safe_features,
+            "unsafe": extracted_unsafe_features
+        }
+        id += 1
+
+    plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sample)
+
+    run_diffusion_inference_analysis(extracted_safe_unsafe_diffusion_features_per_sample)
+
 
 
 if __name__ == "__main__":
@@ -95,7 +234,10 @@ if __name__ == "__main__":
     # loading Stable Diffusion model variant
     # sd_1_4 = StableDiffusionVariant(model_name="CompVis/stable-diffusion-v1-4", clip_model_name="openai/clip-vit-large-patch14")
     # sd_1_5 = StableDiffusionVariant(model_name="runwayml/stable-diffusion-v1-5", clip_model_name="openai/clip-vit-large-patch14")
-    cat_image_path = "/Users/hasnatmdabdullah/Documents/Developer/SDInferSafetyAnalaysis/cat.png"
+    cat_image_path = "cat.png"
     cat_image_prompt = "A cat is sitting there"
     test_diffusion_feature_extractor(cat_image_path, cat_image_prompt)
+
+    # run inference safety analysis
+    run_inference_safety_analysis()
 
