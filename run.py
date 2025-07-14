@@ -9,6 +9,7 @@ import pickle
 from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 # imports for diffusion loading
 from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler
@@ -184,13 +185,129 @@ def extract_diffusion_features(diffusion_feature_extractor,sample):
 
 def plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sample):
     """
-    Plot clusters of safe and unsafe features for visualization
+    Plot clusters of safe and unsafe features for visualization using 3D PCA
     
     Args:
         extracted_safe_unsafe_diffusion_features_per_sample: Dictionary containing features per sample
+        key name for feature extraction from safe/unsafe: ['up-level1-repeat1-vit-block0-cross-q', 'up-level2-repeat1-vit-block0-cross-map']
     """
-    print(f"extracted_safe_unsafe_diffusion_features_per_sample.keys(): {extracted_safe_unsafe_diffusion_features_per_sample.keys()}")
-    exit()
+    print(f"extracted_safe_unsafe_diffusion_features_per_sample[0]: {extracted_safe_unsafe_diffusion_features_per_sample[0]['safe'].keys()}")
+    
+    # Feature keys to visualize
+    feature_keys = ['up-level1-repeat1-vit-block0-cross-q']
+    
+    for feature_key in feature_keys:
+        print(f"\nProcessing feature: {feature_key}")
+        
+        # Collect all safe and unsafe features for this feature key
+        all_safe_features = []
+        all_unsafe_features = []
+        sample_indices = []
+        
+        for sample_id, value in extracted_safe_unsafe_diffusion_features_per_sample.items():
+            if feature_key in value['safe'] and feature_key in value['unsafe']:
+                safe_features = value['safe'][feature_key]  # shape: torch.Size([1, 1280, 16, 16]) or similar
+                unsafe_features = value['unsafe'][feature_key]
+                
+                print(f"Sample {sample_id} - Safe features shape: {safe_features.shape}")
+                print(f"Sample {sample_id} - Unsafe features shape: {unsafe_features.shape}")
+                
+                # Flatten features for PCA (keeping batch dimension and flattening spatial dimensions)
+                if len(safe_features.shape) == 4:  # [batch, channels, height, width]
+                    safe_flat = safe_features.reshape(safe_features.shape[0], -1)  # [batch, channels*height*width]
+                    unsafe_flat = unsafe_features.reshape(unsafe_features.shape[0], -1)
+                elif len(safe_features.shape) == 3:  # [batch, seq_len, features]
+                    safe_flat = safe_features.reshape(safe_features.shape[0], -1)
+                    unsafe_flat = unsafe_features.reshape(unsafe_features.shape[0], -1)
+                else:
+                    safe_flat = safe_features
+                    unsafe_flat = unsafe_features
+                
+                # Convert to numpy if tensor
+                if torch.is_tensor(safe_flat):
+                    safe_flat = safe_flat.cpu().numpy()
+                if torch.is_tensor(unsafe_flat):
+                    unsafe_flat = unsafe_flat.cpu().numpy()
+                
+                all_safe_features.append(safe_flat)
+                all_unsafe_features.append(unsafe_flat)
+                sample_indices.append(sample_id)
+        
+        if not all_safe_features:
+            print(f"No features found for key: {feature_key}")
+            continue
+            
+        # Concatenate all features
+        safe_features_matrix = np.vstack(all_safe_features)  # [n_samples, n_features]
+        unsafe_features_matrix = np.vstack(all_unsafe_features)
+        
+        print(f"Safe features matrix shape: {safe_features_matrix.shape}")
+        print(f"Unsafe features matrix shape: {unsafe_features_matrix.shape}")
+        
+        # Combine safe and unsafe features for PCA
+        combined_features = np.vstack([safe_features_matrix, unsafe_features_matrix])
+        
+        # Apply PCA to reduce to 3 dimensions
+        pca = PCA(n_components=3)
+        features_3d = pca.fit_transform(combined_features)
+        
+        # Split back into safe and unsafe
+        n_safe = safe_features_matrix.shape[0]
+        safe_features_3d = features_3d[:n_safe]
+        unsafe_features_3d = features_3d[n_safe:]
+        
+        # Create 3D plot
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Plot safe features in blue
+        ax.scatter(safe_features_3d[:, 0], safe_features_3d[:, 1], safe_features_3d[:, 2], 
+                  c='blue', label='Safe', alpha=0.7, s=50)
+        
+        # Plot unsafe features in red
+        ax.scatter(unsafe_features_3d[:, 0], unsafe_features_3d[:, 1], unsafe_features_3d[:, 2], 
+                  c='red', label='Unsafe', alpha=0.7, s=50)
+        
+        # Add labels for each point
+        # for i, sample_id in enumerate(sample_indices):
+        #     ax.text(safe_features_3d[i, 0], safe_features_3d[i, 1], safe_features_3d[i, 2], 
+        #            f'S{sample_id}', fontsize=8)
+        #     ax.text(unsafe_features_3d[i, 0], unsafe_features_3d[i, 1], unsafe_features_3d[i, 2], 
+        #            f'U{sample_id}', fontsize=8)
+        
+        # Customize plot
+        ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)')
+        ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)')
+        ax.set_zlabel(f'PC3 ({pca.explained_variance_ratio_[2]:.2%} variance)')
+        ax.set_title(f'3D PCA Visualization of Safe vs Unsafe Features\nFeature: {feature_key}')
+        ax.legend()
+        
+        # Add grid
+        ax.grid(True, alpha=0.3)
+        
+        # Save plot
+        plt.tight_layout()
+        plt.savefig(f'safe_unsafe_pca_3d_{feature_key.replace("-", "_")}.png', dpi=300, bbox_inches='tight')
+        # plt.show()
+        plt.savefig(f'safe_unsafe_pca_3d_{feature_key.replace("-", "_")}.pdf', dpi=300, bbox_inches='tight')
+        
+        # Print PCA info
+        print(f"\nPCA Results for {feature_key}:")
+        print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
+        print(f"Total explained variance: {pca.explained_variance_ratio_.sum():.2%}")
+        print(f"Original feature dimension: {combined_features.shape[1]}")
+        print(f"Reduced to 3D")
+        
+        # Calculate and print distances between safe and unsafe centroids
+        safe_centroid = np.mean(safe_features_3d, axis=0)
+        unsafe_centroid = np.mean(unsafe_features_3d, axis=0)
+        centroid_distance = np.linalg.norm(safe_centroid - unsafe_centroid)
+        
+        print(f"Safe centroid (3D): {safe_centroid}")
+        print(f"Unsafe centroid (3D): {unsafe_centroid}")
+        print(f"Distance between centroids: {centroid_distance:.4f}")
+        
+        print("-" * 50)
 
 def test_diffusion_feature_extractor(image_path, prompt):
     diffusion_feature_extractor = set_diffusion_feature_extractor()
@@ -234,7 +351,7 @@ def run_diffusion_inference_analysis(extracted_safe_unsafe_diffusion_features_pe
 
 
 def run_inference_safety_analysis():
-    detonate_t2i_dataset = load_detonate_t2I_alignment_dataset(sample_size=10)
+    detonate_t2i_dataset = load_detonate_t2I_alignment_dataset(sample_size=500)
     
     extracted_safe_unsafe_diffusion_features_per_sample = {}
     id = 0
@@ -263,8 +380,7 @@ def run_inference_safety_analysis():
         extracted_safe_unsafe_diffusion_features_per_sample = pickle.load(f)
     print("Loaded extracted_safe_unsafe_diffusion_features_per_sample from extracted_safe_unsafe_diffusion_features_per_sample_500.pkl")
 
-    print(f"extracted_safe_unsafe_diffusion_features_per_sample[0]: {extracted_safe_unsafe_diffusion_features_per_sample[0]}")
-    print(f"len(extracted_safe_unsafe_diffusion_features_per_sample): {len(extracted_safe_unsafe_diffusion_features_per_sample)}")
+    
 
     plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sample)
 
