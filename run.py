@@ -301,13 +301,55 @@ def plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sampl
         # Calculate and print distances between safe and unsafe centroids
         safe_centroid = np.mean(safe_features_3d, axis=0)
         unsafe_centroid = np.mean(unsafe_features_3d, axis=0)
-        centroid_distance = np.linalg.norm(safe_centroid - unsafe_centroid)
+        centroid_distance = np.linalg.norm(safe_centroid - unsafe_centroid) # unit: Euclidean distance
         
         print(f"Safe centroid (3D): {safe_centroid}")
         print(f"Unsafe centroid (3D): {unsafe_centroid}")
         print(f"Distance between centroids: {centroid_distance:.4f}")
         
         print("-" * 50)
+
+        # Create rotating GIF
+        print(f"Creating rotating GIF for {feature_key}")
+        angles = np.linspace(0, 360, 60)  # 60 frames for smooth rotation
+        gif_frames = []
+
+        for angle in angles:
+            # Create a new figure for each frame
+            fig_gif = plt.figure(figsize=(10, 8))
+            ax_gif = fig_gif.add_subplot(111, projection='3d')
+            
+            # Plot the same data
+            ax_gif.scatter(safe_features_3d[:, 0], safe_features_3d[:, 1], safe_features_3d[:, 2], 
+                          c='blue', label='Safe', alpha=0.7, s=50)
+            ax_gif.scatter(unsafe_features_3d[:, 0], unsafe_features_3d[:, 1], unsafe_features_3d[:, 2], 
+                          c='red', label='Unsafe', alpha=0.7, s=50)
+            
+            # Set the viewing angle
+            ax_gif.view_init(elev=45, azim=angle)
+            
+            # Customize plot
+            ax_gif.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.2%})')
+            ax_gif.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.2%})')
+            ax_gif.set_zlabel(f'PC3 ({pca.explained_variance_ratio_[2]:.2%})')
+            ax_gif.set_title(f'Safe vs Unsafe Features - {feature_key}')
+            ax_gif.legend()
+            ax_gif.grid(True, alpha=0.3)
+            
+            # Save frame to memory
+            fig_gif.canvas.draw()
+            buf = fig_gif.canvas.buffer_rgba()
+            frame = np.asarray(buf)
+            frame = frame[:, :, :3]  # Remove alpha channel to get RGB
+            gif_frames.append(Image.fromarray(frame))
+            
+            plt.close(fig_gif)
+
+        # Save as GIF
+        gif_path = f'safe_unsafe_pca_3d_{feature_key.replace("-", "_")}_rotating.gif'
+        gif_frames[0].save(gif_path, save_all=True, append_images=gif_frames[1:], 
+                           duration=100, loop=0)
+        print(f"Rotating GIF saved as {gif_path}")
 
 def test_diffusion_feature_extractor(image_path, prompt):
     diffusion_feature_extractor = set_diffusion_feature_extractor()
@@ -356,24 +398,40 @@ def run_inference_safety_analysis():
     extracted_safe_unsafe_diffusion_features_per_sample = {}
     id = 0
     # traverse samples
-    
+
     if not os.path.exists(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl")):
         diffusion_feature_extractor = set_diffusion_feature_extractor()
         for sample in tqdm(detonate_t2i_dataset.data):
             extracted_safe_features, extracted_unsafe_features = extract_diffusion_features(diffusion_feature_extractor,sample)
-            extracted_safe_unsafe_diffusion_features_per_sample[id] = {
+            
+            # Create entry for current sample
+            current_sample_data = {
                 "prompt": sample['Prompt'],
                 "safe": extracted_safe_features,
                 "unsafe": extracted_unsafe_features
             }
+            
+            # Load existing data if file exists
+            if os.path.exists(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl")):
+                with open(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl"), "rb") as f:
+                    extracted_safe_unsafe_diffusion_features_per_sample = pickle.load(f)
+            
+            # Add current sample
+            extracted_safe_unsafe_diffusion_features_per_sample[id] = current_sample_data
+            
+            # Save updated data
+            with open(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl"), "wb") as f:
+                pickle.dump(extracted_safe_unsafe_diffusion_features_per_sample, f)
+            
+            # Clear memory
+            del current_sample_data, extracted_safe_features, extracted_unsafe_features
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
             id += 1
-    
-    
-
-        # save the features
-        with open(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl"), "wb") as f:
-            pickle.dump(extracted_safe_unsafe_diffusion_features_per_sample, f)
-        print("Saved extracted_safe_unsafe_diffusion_features_per_sample to extracted_safe_unsafe_diffusion_features_per_sample_500.pkl")
+        
+        print("Saved extracted_safe_unsafe_diffusion_features_per_sample to extracted_safe_unsafe_diffusion_features_per_sample.pkl")
     
     # load the features
     with open(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl"), "rb") as f:
