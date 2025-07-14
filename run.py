@@ -7,7 +7,7 @@ from sklearn.decomposition import PCA
 from pathlib import Path
 import pickle
 from tqdm import tqdm
-
+import os
 import matplotlib.pyplot as plt
 
 # imports for diffusion loading
@@ -58,8 +58,8 @@ class StableDiffusionVariant():
 
 
 def set_diffusion_feature_extractor():
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    # device = "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cpu"
     print(f"Using device: {device}")
     df = diffusion_feature.FeatureExtractor(
         layer={
@@ -87,7 +87,7 @@ def calculate_centroids(extracted_safe_unsafe_diffusion_features_per_sample):
     Returns:
         tuple: (safe_centroid, unsafe_centroid)
     """
-    pass
+    assert False, "calculate_centroids needs to implement"
 
 def get_intermediate_images_of_diffusion_inference(sd_model, prompt, n_steps=50, p_step=10):
     """
@@ -102,7 +102,7 @@ def get_intermediate_images_of_diffusion_inference(sd_model, prompt, n_steps=50,
     Returns:
         list: List of intermediate images at each p_step interval
     """
-    pass
+    assert False, "get_intermediate_images_of_diffusion_inference needs to implement"
 
 def get_image_tokens(image, sd_model):
     """
@@ -115,7 +115,7 @@ def get_image_tokens(image, sd_model):
     Returns:
         torch.Tensor: Image tokens/features
     """
-    pass
+    assert False, "get_image_tokens needs to implement"
 
 def calculate_distance_from_centroid(image_tokens, centroid):
     """
@@ -128,7 +128,7 @@ def calculate_distance_from_centroid(image_tokens, centroid):
     Returns:
         tuple: (distances_per_token, mean_distance)
     """
-    pass
+    assert False, "calculate_distance_from_centroid needs to implement"
 
 def load_detonate_t2I_alignment_dataset(sample_size=100):
     """
@@ -140,19 +140,48 @@ def load_detonate_t2I_alignment_dataset(sample_size=100):
     Returns:
         DetonateT2IAlignmentDataset: Dataset instance
     """
-    pass
+    cache_dir = "./dataset_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    cache_file = os.path.join(cache_dir, f"detonate_t2i_alignment_{sample_size}.pkl")
+    
+    if os.path.exists(cache_file):
+        print(f"Loading cached dataset from {cache_file}")
+        with open(cache_file, "rb") as f:
+            detonate_t2i_dataset = pickle.load(f)
+        print(type(detonate_t2i_dataset))
+        print(f"detonate_t2i_dataset.data: {detonate_t2i_dataset.data}")
+    else:
+        print(f"Creating new dataset and caching to {cache_file}")
+        detonate_t2i_dataset = DetonateT2IAlignmentDataset(dataset_name="DetonateT2I/T2I_Alignment_Detonate", sample_size=sample_size)
+        with open(cache_file, "wb") as f:
+            pickle.dump(detonate_t2i_dataset, f)
+    
+    return detonate_t2i_dataset
 
-def extract_diffusion_features(sample):
+def extract_diffusion_features(diffusion_feature_extractor,sample):
     """
     Extract diffusion features from a dataset sample
     
     Args:
         sample: Dataset sample containing prompt, chosen and rejected images
+        images are PIL Image objects
         
     Returns:
         tuple: (extracted_safe_features, extracted_unsafe_features)
+        both are dictionaries containing extracted features
+       keys: (['up-level1-repeat1-vit-block0-cross-q', 'up-level2-repeat1-vit-block0-cross-map']
     """
-    pass
+    
+    prompt = diffusion_feature_extractor.encode_prompt(sample['Prompt'])
+    chosen_safe_image = sample['Chosen'] 
+    rejected_unsafe_image = sample['Rejected'] 
+
+    # Extract features for safe and unsafe images
+    extracted_safe_features = diffusion_feature_extractor.extract(prompt, batch_size=1, image=[chosen_safe_image])
+    extracted_unsafe_features = diffusion_feature_extractor.extract(prompt, batch_size=1, image=[rejected_unsafe_image])
+    
+    return extracted_safe_features, extracted_unsafe_features
 
 def plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sample):
     """
@@ -161,7 +190,8 @@ def plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sampl
     Args:
         extracted_safe_unsafe_diffusion_features_per_sample: Dictionary containing features per sample
     """
-    pass
+    print(f"extracted_safe_unsafe_diffusion_features_per_sample.keys(): {extracted_safe_unsafe_diffusion_features_per_sample.keys()}")
+    exit()
 
 def test_diffusion_feature_extractor(image_path, prompt):
     diffusion_feature_extractor = set_diffusion_feature_extractor()
@@ -206,17 +236,36 @@ def run_diffusion_inference_analysis(extracted_safe_unsafe_diffusion_features_pe
 
 def run_inference_safety_analysis():
     detonate_t2i_dataset = load_detonate_t2I_alignment_dataset(sample_size=10)
+    
     extracted_safe_unsafe_diffusion_features_per_sample = {}
     id = 0
     # traverse samples
-    for sample in tqdm(detonate_t2i_dataset.data):
-        extracted_safe_features, extracted_unsafe_features = extract_diffusion_features(sample)
-        extracted_safe_unsafe_diffusion_features_per_sample[id] = {
-            "prompt": sample['Prompt'],
-            "safe": extracted_safe_features,
-            "unsafe": extracted_unsafe_features
-        }
-        id += 1
+    
+    if not os.path.exists(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl")):
+        diffusion_feature_extractor = set_diffusion_feature_extractor()
+        for sample in tqdm(detonate_t2i_dataset.data):
+            extracted_safe_features, extracted_unsafe_features = extract_diffusion_features(diffusion_feature_extractor,sample)
+            extracted_safe_unsafe_diffusion_features_per_sample[id] = {
+                "prompt": sample['Prompt'],
+                "safe": extracted_safe_features,
+                "unsafe": extracted_unsafe_features
+            }
+            id += 1
+    
+    
+
+        # save the features
+        with open(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl"), "wb") as f:
+            pickle.dump(extracted_safe_unsafe_diffusion_features_per_sample, f)
+        print("Saved extracted_safe_unsafe_diffusion_features_per_sample to extracted_safe_unsafe_diffusion_features_per_sample_500.pkl")
+    
+    # load the features
+    with open(Path("extracted_safe_unsafe_diffusion_features_per_sample.pkl"), "rb") as f:
+        extracted_safe_unsafe_diffusion_features_per_sample = pickle.load(f)
+    print("Loaded extracted_safe_unsafe_diffusion_features_per_sample from extracted_safe_unsafe_diffusion_features_per_sample_500.pkl")
+
+    print(f"extracted_safe_unsafe_diffusion_features_per_sample[0]: {extracted_safe_unsafe_diffusion_features_per_sample[0]}")
+    print(f"len(extracted_safe_unsafe_diffusion_features_per_sample): {len(extracted_safe_unsafe_diffusion_features_per_sample)}")
 
     plot_safe_unsafe_clusters(extracted_safe_unsafe_diffusion_features_per_sample)
 
@@ -236,8 +285,7 @@ if __name__ == "__main__":
     # sd_1_5 = StableDiffusionVariant(model_name="runwayml/stable-diffusion-v1-5", clip_model_name="openai/clip-vit-large-patch14")
     cat_image_path = "cat.png"
     cat_image_prompt = "A cat is sitting there"
-    test_diffusion_feature_extractor(cat_image_path, cat_image_prompt)
+    # test_diffusion_feature_extractor(cat_image_path, cat_image_prompt)
 
     # run inference safety analysis
     run_inference_safety_analysis()
-
