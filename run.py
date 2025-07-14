@@ -58,8 +58,7 @@ class StableDiffusionVariant():
 
 
 def set_diffusion_feature_extractor():
-    # device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Using device: {device}")
     df = diffusion_feature.FeatureExtractor(
         layer={
@@ -69,7 +68,7 @@ def set_diffusion_feature_extractor():
         },
         version='1-5',
         img_size=512,
-        device='cuda',
+        device=device,
     )   
     return df
 
